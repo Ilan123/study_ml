@@ -1,0 +1,1 @@
+docker run --gpus all --rm -it -p 8898:8888 -p 8797:8787 -p 8796:8786  -v %cd%/:/workspace pytorch/pytorch:2.7.1-cuda11.8-cudnn9-runtime
