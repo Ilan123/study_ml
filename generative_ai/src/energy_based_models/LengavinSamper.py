@@ -4,7 +4,7 @@ from Buffer import Buffer, AbstractBuffer
 from typing import Tuple, Union
 import math
 
-class LangevinSamper:
+class LangevinSampler:
     """
     Langevin MCMC sampler for energy-based models.
     
