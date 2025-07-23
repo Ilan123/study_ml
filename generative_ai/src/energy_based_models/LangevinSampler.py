@@ -31,7 +31,7 @@ class LangevinSampler:
         self._model = model
         self._default_n_steps = default_n_steps
         self._default_step_size = default_step_size
-        self._ = 
+        self._buffer = buffer
         self._clip_grad = clip_grad
         self._clip_sample = clip_sample
         self._was_param_freazed = {}
