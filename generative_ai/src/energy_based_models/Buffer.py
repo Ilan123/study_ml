@@ -8,7 +8,13 @@ def choice(a, size, device='cpu'):
 
 
 class AbstractBuffer(ABC):
-    def __init__(self, size: int, shape: torch.Size, reinit_prob: float, device: str):
+    def __init__(
+            self,
+            size: int,
+            shape: torch.Size,
+            reinit_prob: float,
+            device: str
+        ):
         self._size = size
         self.shape = shape
         self._reinit_prob = reinit_prob
