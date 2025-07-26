@@ -24,6 +24,7 @@ class LangevinSampler:
         model: nn.Module,
         default_n_steps: int,
         default_step_size: float,
+        default_noise_scale: float,
         buffer: AbstractBuffer = None,
         clip_grad: bool = True,
         clip_sample: bool = True,
@@ -31,6 +32,7 @@ class LangevinSampler:
         self._model = model
         self._default_n_steps = default_n_steps
         self._default_step_size = default_step_size
+        self._default_noise_scale = default_noise_scale
         self._buffer = buffer
         self._clip_grad = clip_grad
         self._clip_sample = clip_sample
@@ -82,12 +84,22 @@ class LangevinSampler:
             step_size = self._default_step_size
         return n_steps, step_size
     
+    def _get_noise_scale(self, noise_scale):
+        if noise_scale is None:
+            noise_scale = self._default_noise_scale
+        return noise_scale
+    
+    def _get_device(self, device):
+        if device is None:
+            device = self._buffer._device
+        return device
 
     def _perform_langevin_chain(
         self,
         x: Tensor,
         n_steps: Union[int, None] = None,
-        step_size: Union[float, None] = None
+        step_size: Union[float, None] = None,
+        noise_scale: Union[float, None] = None,
     ) -> Tensor:
         """
         Perform Langevin MCMC chain starting from x.
@@ -103,11 +115,12 @@ class LangevinSampler:
             Final sample after n_steps
         """
         n_steps, step_size = self._get_n_steps_and_step_size(n_steps, step_size)
+        noise_scale = self._get_noise_scale(noise_scale)
         self._freeze_model()
         for _ in range(n_steps):
             grad, noise = self._get_grad_and_noise(x)
-            x.data.add_(grad, alpha=-step_size)
-            x.data.add_(noise, alpha=-math.sqrt(2*step_size))
+            x.data.add_(grad.data, alpha=-1 * step_size)
+            x.data.add_(noise.data , alpha=math.sqrt(2 * noise_scale))
             if self._clip_sample:
                 x.data.clamp_(-1, 1)
         self._unfreeze_model()
@@ -119,11 +132,12 @@ class LangevinSampler:
         n: int,
         n_steps: Union[int, None] = None,
         step_size: Union[float, None] = None,
-        device: str = 'cpu',
+        noise_scale: Union[float, None] = None,
+        device: Union[str, None] = None,
     ) -> Tensor:
         """Sample using persistent chains from replay buffer."""
         idx, sample = self._buffer.get_random_sample(n)
-        sample = self._perform_langevin_chain(sample, n_steps, step_size).to(device)
+        sample = self._perform_langevin_chain(sample, n_steps, step_size, noise_scale).to(device)
         self._buffer.update_buffer(idx, sample)
         return sample
 
@@ -131,14 +145,15 @@ class LangevinSampler:
     def sample(
         self,
         n: int,
-        shape: torch.Size,
         n_steps: Union[int, None] = None,
         step_size: Union[float, None] = None,
-        device: str = 'cpu',
+        noise_scale: Union[float, None] = None,
+        device: Union[str, None] = None,
     ) -> Tensor:
         """Generate samples from random initialization."""
-        sample = torch.randn([n, *shape], device=device)
-        sample = self._perform_langevin_chain(sample, n_steps, step_size).to(device)
+        device = self._get_device(device)
+        sample = torch.randn([n, *self._buffer.shape], device=device)
+        sample = self._perform_langevin_chain(sample, n_steps, step_size, noise_scale).to(device)
         return sample
 
     
