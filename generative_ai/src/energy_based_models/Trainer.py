@@ -252,7 +252,8 @@ class EnergyModelTrainer:
         
         # Visualization every 10 epochs
         if (epoch + 1) % 10 == 0:
-            visualize_samples(self.sampler.sample, epoch + 1)
+            samples = self.sampler.sample(n=16).detach().cpu()[:,0]
+            visualize_samples(samples, epoch + 1)
 
     def train(
         self, 
