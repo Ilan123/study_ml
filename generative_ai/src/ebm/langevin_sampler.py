@@ -1,6 +1,6 @@
 import torch
 from torch import nn, Tensor
-from buffer import AbstractBuffer
+from .buffer import AbstractBuffer
 from typing import Tuple, Union
 import math
 
