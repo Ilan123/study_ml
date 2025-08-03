@@ -1,5 +1,5 @@
 import torch
-from torch import nn
+from torch import nn, Tensor
 from typing import Callable
 from matplotlib import pyplot as plt
 
@@ -40,10 +40,9 @@ def load_best_model(
     return model
     
 
-def visualize_samples(sampler: Callable, epoch=None):
+def visualize_samples(samples: Tensor, epoch=None):
     """Generate and display sample images from the trained model."""
     # Sample
-    samples = sampler(n=16).detach().cpu()[:,0]
     samples = torch.clamp(samples, 0, 1)
     
     # Plot samples
