@@ -10,7 +10,8 @@ import os
 project_root = os.path.abspath(os.path.join(os.getcwd(), '..'))
 sys.path.append(project_root)
 
-from utils.utils import save_model_with_train_state, visualize_samples
+from utils.checkpoint import save_model_with_train_state
+from utils.visualization import visualize_samples
 
 
 @dataclass
@@ -225,7 +226,7 @@ class EnergyModelTrainer:
         with torch.no_grad():
             return self.run_epoch(val_dataloader, training_mode=False)
     
-    def _update_best_model(self, epoch: int, val_loss: float, train_loss: float) -> bool:
+    def _update_best_model(self, epoch: int, train_loss: float, val_loss: float) -> bool:
         """Update best model tracking. Returns True if this is a new best."""
         if val_loss < self.best_val_loss:
             self.best_val_loss = val_loss
@@ -244,8 +245,9 @@ class EnergyModelTrainer:
         self.metrics.add_val_metrics(*val_results)
         
         # Check for best model
+        train_loss = train_results[0]
         val_loss = val_results[0]
-        is_best = self._update_best_model(epoch, val_loss, train_results[0])
+        is_best = self._update_best_model(epoch, train_loss, val_loss)
         
         # Print results
         self.print_epoch_results(epoch, train_results, val_results, is_best)

@@ -1,6 +1,6 @@
 import torch
 from torch import nn, Tensor
-from Buffer import AbstractBuffer
+from .buffer import AbstractBuffer
 from typing import Tuple, Union
 import math
 
@@ -22,9 +22,9 @@ class LangevinSampler:
     def __init__(
         self,
         model: nn.Module,
-        default_n_steps: int,
-        default_step_size: float,
-        default_noise_scale: float,
+        default_n_steps: int = 60,
+        default_step_size: float = 10,
+        default_noise_scale: float = 5e-3,
         buffer: AbstractBuffer = None,
         clip_grad: bool = True,
         clip_sample: bool = True,
@@ -90,8 +90,10 @@ class LangevinSampler:
         return noise_scale
     
     def _get_device(self, device):
-        if device is None:
+        if (device is None) and (self._buffer is not None):
             device = self._buffer._device
+        else:
+            device = 'cpu'
         return device
 
     def _perform_langevin_chain(
@@ -157,3 +159,15 @@ class LangevinSampler:
         return sample
 
     
+def perform_langevin_chain(
+        x: Tensor,
+        model: nn.Module,
+        n_steps: int,
+        step_size: float,
+        noise_scale: float,
+        clip_grad: bool = True,
+        clip_sample: bool = True,
+    ) -> Tensor:
+    sampler = LangevinSampler(model, n_steps, step_size, noise_scale,
+                              None, clip_grad, clip_sample)
+    return sampler._perform_langevin_chain(x)

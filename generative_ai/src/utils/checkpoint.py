@@ -1,7 +1,5 @@
 import torch
-from torch import nn, Tensor
-from typing import Callable
-from matplotlib import pyplot as plt
+from torch import nn
 
 def save_model_with_train_state(
     checkpoint_path: str,
@@ -26,7 +24,7 @@ def save_model_with_train_state(
     }, checkpoint_path)
 
 
-def load_best_model(
+def load_model(
         model: nn.Module,
         checkpoint_path: str,
         device: str
@@ -39,19 +37,3 @@ def load_best_model(
     
     return model
     
-
-def visualize_samples(samples: Tensor, epoch=None):
-    """Generate and display sample images from the trained model."""
-    # Sample
-    samples = torch.clamp(samples, 0, 1)
-    
-    # Plot samples
-    fig, axes = plt.subplots(4, 4, figsize=(8, 8))
-    for i, ax in enumerate(axes.flat):
-        ax.imshow(samples[i], cmap='gray')
-        ax.axis('off')
-    
-    title = f'Generated Samples - Epoch {epoch}' if epoch else 'Generated Samples'
-    plt.suptitle(title)
-    plt.tight_layout()
-    plt.show()
