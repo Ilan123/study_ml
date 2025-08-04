@@ -2,3 +2,6 @@
 /generative_ai/models
 *.pyc
 /keys
+.claudeignore
+/.claudesync
+/.vscode
