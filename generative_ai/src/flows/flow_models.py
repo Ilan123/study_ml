@@ -64,7 +64,7 @@ class FlowSequential(nn.Module):
         # Optional: put extra logic here before/after forward
         return self.forward(x, log_det)
     
-    def sample(self, num_samples: int, device:str=device) -> Tensor:
+    def sample(self, num_samples: int, device:str) -> Tensor:
         """
             Generate samples by transforming base distribution samples.
             
