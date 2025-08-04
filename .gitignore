@@ -1,3 +1,4 @@
 /generative_ai/data
 /generative_ai/models
 *.pyc
+/keys
