@@ -71,7 +71,7 @@ class LangevinSampler:
     
 
     def _get_grad_and_noise(self, x: Tensor) -> Tuple[Tensor, Tensor]:
-        noise = torch.randn_like(x, device=x.get_device())
+        noise = torch.randn_like(x, device=x.device)
         grad = self._compute_grads(x).detach()
         return grad, noise
     
