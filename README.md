@@ -29,6 +29,13 @@ study_ml/
 - Core sampling algorithms and Monte Carlo methods
 - Implementations of fundamental statistical techniques
 
+## Module Documentation
+
+For detailed implementation guides, usage examples, and specific setup instructions:
+
+- **[`generative_ai/README.md`](generative_ai/README.md)** - Energy-Based Models and Normalizing Flows documentation
+- **[`sampling_methods/README.md`](sampling_methods/README.md)** - Statistical sampling algorithms documentation
+
 ## Quick Start
 
 ### Environment Setup
