@@ -81,7 +81,8 @@ def train_generative_model(
 
         if (epoch + 1) % 10 == 0:
             samples = model.sample(16, device).cpu()
-            visualize_samples(samples, epoch+1)
+            title = f'Generated Samples - Epoch {epoch+1}'
+            visualize_samples(samples, title=title)
 
         # Early stopping check
         if epochs_without_improvement >= patience:
