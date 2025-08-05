@@ -33,7 +33,7 @@ study_ml/
 
 For detailed implementation guides, usage examples, and specific setup instructions:
 
-- **[`generative_ai/README.md`](generative_ai/README.md)** - Energy-Based Models and Normalizing Flows documentation
+- **[`generative_ai/README.md`](generative_ai/README.md)** - Detailed generative models documentation
 - **[`sampling_methods/README.md`](sampling_methods/README.md)** - Statistical sampling algorithms documentation
 
 ## Quick Start
@@ -77,10 +77,6 @@ See individual module READMEs for detailed documentation and usage examples.
 - **Modular Design**: Reusable components for rapid experimentation
 - **Containerized Environments**: Reproducible setups with Docker support
 
-## Module Documentation
-
-- [`generative_ai/README.md`](generative_ai/README.md) - Detailed generative models documentation
-- [`sampling_methods/README.md`](sampling_methods/README.md) - Statistical sampling methods
 
 
 ## License
