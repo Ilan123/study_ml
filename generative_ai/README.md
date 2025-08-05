@@ -56,4 +56,4 @@ pip install torch torchvision matplotlib tqdm
 
 4. Welling, M., & Teh, Y. W. (2011). Bayesian learning via stochastic gradient Langevin dynamics. *Proceedings of the 28th International Conference on Machine Learning*.
 
-->>
+->
