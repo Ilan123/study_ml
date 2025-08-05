@@ -75,15 +75,6 @@ See individual module READMEs for detailed documentation and usage examples.
 - [`generative_ai/README.md`](generative_ai/README.md) - Detailed generative models documentation
 - [`sampling_methods/README.md`](sampling_methods/README.md) - Statistical sampling methods
 
-## References
-
-1. Dinh, L., Krueger, D., & Bengio, Y. (2014). NICE: Non-linear independent components estimation. *arXiv preprint arXiv:1410.8516*.
-
-2. Dinh, L., Sohl-Dickstein, J., & Bengio, S. (2016). Density estimation using real NVP. *arXiv preprint arXiv:1605.08803*.
-
-3. Du, Y., & Mordatch, I. (2019). Implicit generation and modeling with energy based models. *Advances in Neural Information Processing Systems*, 32.
-
-4. Welling, M., & Teh, Y. W. (2011). Bayesian learning via stochastic gradient Langevin dynamics. *Proceedings of the 28th International Conference on Machine Learning*.
 
 ## License
 
