@@ -1,7 +1,7 @@
 import torch
 from torch import nn, Tensor
 from .buffer import AbstractBuffer
-from typing import Tuple, Union
+from typing import Tuple, Union, Callable
 import math
 
 class LangevinSampler:
@@ -28,6 +28,7 @@ class LangevinSampler:
         buffer: AbstractBuffer = None,
         clip_grad: bool = True,
         clip_sample: bool = True,
+        logit_post_process_func: Callable[[Tensor], Tensor] = None
     ):
         self._model = model
         self._default_n_steps = default_n_steps
@@ -36,6 +37,7 @@ class LangevinSampler:
         self._buffer = buffer
         self._clip_grad = clip_grad
         self._clip_sample = clip_sample
+        self.logit_post_process_func = logit_post_process_func
         self._was_param_freazed = {}
 
 
@@ -54,6 +56,11 @@ class LangevinSampler:
         for p in self._model.parameters():
             p.requires_grad = self._was_param_freazed[p]
 
+    
+    def _apply_logit_post_process(self, e: Tensor):
+        if self.logit_post_process_func is not None:
+            e = self.logit_post_process_func(e)
+        return e
 
     def _compute_grads(self, x: Tensor):
         """
@@ -62,7 +69,7 @@ class LangevinSampler:
             Gradients of energy function w.r.t. x
         """
         x.requires_grad_(True)
-        e = self._model(x).sum()
+        e = self._apply_logit_post_process(self._model(x)).sum()
         grad = torch.autograd.grad(e, x, grad_outputs=torch.ones_like(e))[0]
         if self._clip_grad:
             grad.clamp_(-0.03, 0.03)
@@ -101,7 +108,7 @@ class LangevinSampler:
         x: Tensor,
         n_steps: Union[int, None] = None,
         step_size: Union[float, None] = None,
-        noise_scale: Union[float, None] = None,
+        noise_scale: Union[float, None] = None
     ) -> Tensor:
         """
         Perform Langevin MCMC chain starting from x.
@@ -135,7 +142,7 @@ class LangevinSampler:
         n_steps: Union[int, None] = None,
         step_size: Union[float, None] = None,
         noise_scale: Union[float, None] = None,
-        device: Union[str, None] = None,
+        device: Union[str, None] = None
     ) -> Tensor:
         """Sample using persistent chains from replay buffer."""
         idx, sample = self._buffer.get_random_sample(n)
@@ -167,7 +174,8 @@ def perform_langevin_chain(
         noise_scale: float,
         clip_grad: bool = True,
         clip_sample: bool = True,
+        logit_post_process_func: Callable[[Tensor], Tensor] = None,
     ) -> Tensor:
     sampler = LangevinSampler(model, n_steps, step_size, noise_scale,
-                              None, clip_grad, clip_sample)
+                              None, clip_grad, clip_sample, logit_post_process_func)
     return sampler._perform_langevin_chain(x)
