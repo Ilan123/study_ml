@@ -8,7 +8,7 @@ def visualize_samples(samples: Tensor, nrows=4, ncols=4, figsize=(8, 8), title='
     samples = torch.clamp(samples, 0, 1)
     
     # Plot samples
-    fig, axes = plt.subplots(nrows, ncols, figsize=(8, 8))
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
     for i, ax in enumerate(axes.flat):
         ax.imshow(samples[i], cmap='gray')
         ax.axis('off')
