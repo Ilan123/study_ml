@@ -56,20 +56,25 @@ class LangevinSampler:
         for p in self._model.parameters():
             p.requires_grad = self._was_param_freazed[p]
 
+    def _get_target_class_energies(self, e: Tensor, target_class: int = None):
+        if target_class is not None:
+            e = e[:, target_class]
+        return e
     
     def _apply_logit_post_process(self, e: Tensor):
         if self.logit_post_process_func is not None:
             e = self.logit_post_process_func(e)
         return e
 
-    def _compute_grads(self, x: Tensor):
+    def _compute_grads(self, x: Tensor, target_class: int = None):
         """
         Compute gradients of energy w.r.t. input x.      
         Returns:
             Gradients of energy function w.r.t. x
         """
         x.requires_grad_(True)
-        e = self._apply_logit_post_process(self._model(x)).sum()
+        e = self._apply_logit_post_process(self._model(x))
+        e = self._get_target_class_energies(e, target_class).sum()
         grad = torch.autograd.grad(e, x, grad_outputs=torch.ones_like(e))[0]
         if self._clip_grad:
             grad.clamp_(-0.03, 0.03)
@@ -77,9 +82,9 @@ class LangevinSampler:
         return grad
     
 
-    def _get_grad_and_noise(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+    def _get_grad_and_noise(self, x: Tensor, target_class: int = None) -> Tuple[Tensor, Tensor]:
         noise = torch.randn_like(x, device=x.device)
-        grad = self._compute_grads(x).detach()
+        grad = self._compute_grads(x, target_class).detach()
         return grad, noise
     
 
@@ -108,7 +113,8 @@ class LangevinSampler:
         x: Tensor,
         n_steps: Union[int, None] = None,
         step_size: Union[float, None] = None,
-        noise_scale: Union[float, None] = None
+        noise_scale: Union[float, None] = None,
+        target_class: int = None
     ) -> Tensor:
         """
         Perform Langevin MCMC chain starting from x.
@@ -127,7 +133,7 @@ class LangevinSampler:
         noise_scale = self._get_noise_scale(noise_scale)
         self._freeze_model()
         for _ in range(n_steps):
-            grad, noise = self._get_grad_and_noise(x)
+            grad, noise = self._get_grad_and_noise(x, target_class)
             x.data.add_(grad.data, alpha=-1 * step_size)
             x.data.add_(noise.data , alpha=math.sqrt(2 * noise_scale))
             if self._clip_sample:
@@ -142,11 +148,12 @@ class LangevinSampler:
         n_steps: Union[int, None] = None,
         step_size: Union[float, None] = None,
         noise_scale: Union[float, None] = None,
-        device: Union[str, None] = None
+        device: Union[str, None] = None,
+        target_class: int = None
     ) -> Tensor:
         """Sample using persistent chains from replay buffer."""
         idx, sample = self._buffer.get_random_sample(n)
-        sample = self._perform_langevin_chain(sample, n_steps, step_size, noise_scale).to(device)
+        sample = self._perform_langevin_chain(sample, n_steps, step_size, noise_scale, target_class).to(device)
         self._buffer.update_buffer(idx, sample)
         return sample
 
@@ -158,11 +165,12 @@ class LangevinSampler:
         step_size: Union[float, None] = None,
         noise_scale: Union[float, None] = None,
         device: Union[str, None] = None,
+        target_class: int = None
     ) -> Tensor:
         """Generate samples from random initialization."""
         device = self._get_device(device)
         sample = torch.randn([n, *self._buffer.shape], device=device)
-        sample = self._perform_langevin_chain(sample, n_steps, step_size, noise_scale).to(device)
+        sample = self._perform_langevin_chain(sample, n_steps, step_size, noise_scale, target_class).to(device)
         return sample
 
     
@@ -175,7 +183,8 @@ def perform_langevin_chain(
         clip_grad: bool = True,
         clip_sample: bool = True,
         logit_post_process_func: Callable[[Tensor], Tensor] = None,
+        target_class: int = None
     ) -> Tensor:
     sampler = LangevinSampler(model, n_steps, step_size, noise_scale,
                               None, clip_grad, clip_sample, logit_post_process_func)
-    return sampler._perform_langevin_chain(x)
+    return sampler._perform_langevin_chain(x, target_class=target_class)
