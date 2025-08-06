@@ -1,9 +1,9 @@
-from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Tuple, Callable
 import torch
-import torch.nn as nn
+from torch import nn, Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from collections import defaultdict
 
 import sys
 import os
@@ -14,62 +14,28 @@ from utils.checkpoint import save_model_with_train_state
 from utils.visualization import visualize_samples
 
 
-@dataclass
-class TrainingMetrics:
-    """Container for training metrics."""
-    train_losses: List[float] = field(default_factory=list)
-    train_losses_cd: List[float] = field(default_factory=list)
-    train_losses_reg: List[float] = field(default_factory=list)
-    train_energies_real: List[float] = field(default_factory=list)
-    train_energies_fake: List[float] = field(default_factory=list)
-    train_energies_rand: List[float] = field(default_factory=list)
-    
-    val_losses: List[float] = field(default_factory=list)
-    val_losses_cd: List[float] = field(default_factory=list)
-    val_losses_reg: List[float] = field(default_factory=list)
-    val_energies_real: List[float] = field(default_factory=list)
-    val_energies_fake: List[float] = field(default_factory=list)
-    val_energies_rand: List[float] = field(default_factory=list)
-    
-    def add_train_metrics(self, loss, loss_cd, loss_reg, e_real, e_fake, e_rand):
-        """Add training metrics for current epoch."""
-        self.train_losses.append(loss)
-        self.train_losses_cd.append(loss_cd)
-        self.train_losses_reg.append(loss_reg)
-        self.train_energies_real.append(e_real)
-        self.train_energies_fake.append(e_fake)
-        self.train_energies_rand.append(e_rand)
-    
-    def add_val_metrics(self, loss, loss_cd, loss_reg, e_real, e_fake, e_rand):
-        """Add validation metrics for current epoch."""
-        self.val_losses.append(loss)
-        self.val_losses_cd.append(loss_cd)
-        self.val_losses_reg.append(loss_reg)
-        self.val_energies_real.append(e_real)
-        self.val_energies_fake.append(e_fake)
-        self.val_energies_rand.append(e_rand)
-
-
 class EnergyModelTrainer:
     """Trainer for energy-based models with contrastive divergence."""
     
     def __init__(
         self, 
         model: nn.Module,
-        alpha: float,
         noise_scale: float,
         sampler,
+        loss_fn: Callable[[nn.Module, Tensor, Tensor, Tensor, Tensor], Tuple[float, dict]],
         device: str,
         lr: float = 1e-4,
         patience: int = 10,
+        visualize_every_n_epochs: int = 10,
         save_path: str = "../models/best_model.pth"
     ):
         self.model = model
-        self.alpha = alpha
         self.noise_scale = noise_scale
         self.sampler = sampler
+        self.loss_fn = loss_fn
         self.device = device
         self.patience = patience
+        self.visualize_every_n_epochs = visualize_every_n_epochs
         self.save_path = save_path
         
         # Initialize optimizer and scheduler
@@ -77,15 +43,16 @@ class EnergyModelTrainer:
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1, gamma=0.97)
         
         # Training state
-        self.metrics = TrainingMetrics()
+        self.metrics = defaultdict(list)
         self.best_val_loss = float('inf')
         self.epochs_without_improvement = 0
         self.best_epoch = 0
         
 
-    def prepare_batch_data(self, data_real, data_fake):
+    def prepare_batch_data(self, data_real, data_real_labels, data_fake):
         """Prepare and preprocess batch data."""
         data_real = data_real.to(self.device)
+        data_real_labels = data_real_labels.to(self.device)
         data_real.data.add_(self.noise_scale * torch.randn_like(data_real)).clamp(-1, 1)
         
         # Match batch sizes
@@ -93,25 +60,10 @@ class EnergyModelTrainer:
             data_fake = data_fake[:len(data_real)]
             
         data_rand = torch.rand_like(data_real, device=self.device)
-        return data_real, data_fake, data_rand
+        return data_real, data_real_labels, data_fake, data_rand
 
 
-    def compute_loss(self, data_real, data_fake, data_rand):
-        """Compute contrastive divergence and regularization losses."""
-        data = torch.cat([data_real, data_fake, data_rand], dim=0)
-        e_real, e_fake, e_rand = self.model(data).chunk(3, dim=0)
-        avg_e_real = torch.mean(e_real)
-        avg_e_fake = torch.mean(e_fake)
-        avg_e_rand = torch.mean(e_rand)
-        
-        loss_cd = avg_e_real - avg_e_fake
-        loss_reg = self.alpha * torch.mean(e_real**2 + e_fake**2)
-        loss = loss_cd + loss_reg
-        
-        return loss, loss_cd, loss_reg, avg_e_real, avg_e_fake, avg_e_rand
-
-
-    def process_batch(self, data_real, training_mode: bool) -> Tuple[float, ...]:
+    def process_batch(self, data_real, data_real_labels, training_mode: bool) -> Tuple[float, ...]:
         """Process a single batch and return loss components and energies."""
         # Generate negative samples
         with torch.enable_grad():
@@ -119,92 +71,64 @@ class EnergyModelTrainer:
                 len(data_real)).to(self.device).detach()
         
         # Prepare batch data
-        data_real, data_fake, data_rand = self.prepare_batch_data(data_real, data_fake)
+        data_real, data_real_labels, data_fake, data_rand = self.prepare_batch_data(
+            data_real, data_real_labels, data_fake)
         
         if training_mode:
             self.optimizer.zero_grad()
         
         # Compute loss
-        loss, loss_cd, loss_reg, e_real, e_fake, e_rand = self.compute_loss(
-            data_real, data_fake, data_rand
-        )
+        loss, metrics = self.loss_fn(self.model, data_real, data_real_labels, data_fake, data_rand)
         
         if training_mode:
             self._backward_and_step(loss)
         
-        return (
-            loss.item(), loss_cd.item(), loss_reg.item(),
-            e_real.item(), e_fake.item(), e_rand.item()
-        )
+        return metrics
     
 
-    def _backward_and_step(self, loss):
-        """Perform backward pass and optimizer step."""
+    def _backward_and_step(self, loss: Tensor):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
         self.optimizer.step()
     
 
     def _accumulate_metrics(self, batch_metrics: dict, batch_results: Tuple[float, ...]):
-        """Accumulate batch results into running metrics."""
-        loss, loss_cd, loss_reg, e_real, e_fake, e_rand = batch_results
-        batch_metrics['total_loss'] += loss
-        batch_metrics['total_loss_cd'] += loss_cd
-        batch_metrics['total_loss_reg'] += loss_reg
-        batch_metrics['total_energy_real'] += e_real
-        batch_metrics['total_energy_fake'] += e_fake
-        batch_metrics['total_energy_rand'] += e_rand
-        batch_metrics['num_batches'] += 1
+        for metric, value in batch_results.items():
+            batch_metrics[metric] += value
     
 
-    def _finalize_epoch_metrics(self, batch_metrics: dict) -> Tuple[float, ...]:
+    def _finalize_epoch_metrics(self, batch_metrics: dict, n_batches: int) -> Tuple[float, ...]:
         """Convert accumulated metrics to averages."""
-        num_batches = batch_metrics['num_batches']
-        return (
-            batch_metrics['total_loss'] / num_batches,
-            batch_metrics['total_loss_cd'] / num_batches,
-            batch_metrics['total_loss_reg'] / num_batches,
-            batch_metrics['total_energy_real'] / num_batches,
-            batch_metrics['total_energy_fake'] / num_batches,
-            batch_metrics['total_energy_rand'] / num_batches,
-        )
+        for metric in batch_metrics.keys():
+            batch_metrics[metric] /= n_batches
+        return batch_metrics
 
     def run_epoch(self, data_loader: DataLoader, training_mode: bool = True) -> Tuple[float, ...]:
-        """Run a single epoch in either training or evaluation mode."""
-        batch_metrics = {
-            'total_loss': 0, 'total_loss_cd': 0, 'total_loss_reg': 0,
-            'total_energy_real': 0, 'total_energy_fake': 0, 'total_energy_rand': 0,
-            'num_batches': 0
-        }
+        batch_metrics = defaultdict(float)
+        n_batches = 0
         
-        for data_real, _ in tqdm(data_loader, total=len(data_loader)):
-            batch_results = self.process_batch(data_real, training_mode)
+        for data_real, data_real_labels in tqdm(data_loader, total=len(data_loader)):
+            n_batches += 1
+            batch_results = self.process_batch(data_real, data_real_labels, training_mode)
             self._accumulate_metrics(batch_metrics, batch_results)
         
-        return self._finalize_epoch_metrics(batch_metrics)
+        return self._finalize_epoch_metrics(batch_metrics, n_batches)
 
     def save_best_model(self, epoch: int, train_loss: float, val_loss: float):
         """Save the best model checkpoint."""
         # You'll need to implement save_model_with_train_state or adapt this
         save_model_with_train_state(
             self.save_path, self.model, epoch, self.optimizer, self.scheduler,
-            train_loss, val_loss, self.metrics.train_losses, self.metrics.val_losses,
+            train_loss, val_loss, self.metrics['train_losses'], self.metrics['val_losses'],
         )
 
     def print_epoch_results(self, epoch: int, train_results: Tuple, val_results: Tuple, is_best: bool = False):
         """Print epoch results in a formatted way."""
-        train_loss, train_cd, train_reg, train_e_real, train_e_fake, train_e_rand = train_results
-        val_loss, val_cd, val_reg, val_e_real, val_e_fake, val_e_rand = val_results
-        
-        base_msg = (
-            f'Epoch {epoch+1} completed. Train: Loss: {train_loss:.5f}, '
-            f'CD Loss: {train_cd:.5f}, Reg Loss: {train_reg:.5f}, '
-            f'E_real: {train_e_real:.4f}, E_fake: {train_e_fake:.4f},\n'
-            f'Val: Loss: {val_loss:.5f}, '
-            f'CD Loss: {val_cd:.5f}, Reg Loss: {val_reg:.5f}, '
-            f'E_real: {val_e_real:.4f}, E_fake: {val_e_fake:.4f}, '
-            f'E_rand: {val_e_rand:.4f}, '
-        )
+        dict_to_str = lambda metric_value: f'{metric_value[0]}: {metric_value[1]:.4f}'
+        train_str = ', '.join(map(dict_to_str, train_results.items()))
+        val_str = ', '.join(map(dict_to_str, val_results.items()))
+
+        base_msg = f'Epoch {epoch+1} completed. Train: {train_str}\nVal: {val_str}'
         
         if is_best:
             print(base_msg + '# NEW BEST MODEL #')
@@ -212,19 +136,20 @@ class EnergyModelTrainer:
             print(base_msg + f'(Best: {self.best_val_loss:.5f} at epoch {self.best_epoch})')
 
     def should_stop_early(self) -> bool:
-        """Check if early stopping criteria is met."""
         return self.epochs_without_improvement >= self.patience
 
     def _run_training_epoch(self, train_dataloader: DataLoader) -> Tuple[float, ...]:
-        """Run a single training epoch."""
         self.model.train()
         return self.run_epoch(train_dataloader, training_mode=True)
     
     def _run_validation_epoch(self, val_dataloader: DataLoader) -> Tuple[float, ...]:
-        """Run a single validation epoch."""
         self.model.eval()
         with torch.no_grad():
             return self.run_epoch(val_dataloader, training_mode=False)
+        
+    def _append_metrics(self, metrics: dict, prefix=''):
+        for metric, value in metrics.items():
+            self.metrics[f'{prefix}{metric}'].append(value)
     
     def _update_best_model(self, epoch: int, train_loss: float, val_loss: float) -> bool:
         """Update best model tracking. Returns True if this is a new best."""
@@ -241,19 +166,19 @@ class EnergyModelTrainer:
     def _handle_epoch_end(self, epoch: int, train_results: Tuple, val_results: Tuple):
         """Handle end-of-epoch tasks: metrics, logging, visualization."""
         # Update metrics
-        self.metrics.add_train_metrics(*train_results)
-        self.metrics.add_val_metrics(*val_results)
+        self._append_metrics(train_results, 'train_')
+        self._append_metrics(val_results, 'val_')
         
         # Check for best model
-        train_loss = train_results[0]
-        val_loss = val_results[0]
+        train_loss = train_results['loss']
+        val_loss = val_results['loss']
         is_best = self._update_best_model(epoch, train_loss, val_loss)
         
         # Print results
         self.print_epoch_results(epoch, train_results, val_results, is_best)
         
-        # Visualization every 10 epochs
-        if (epoch + 1) % 10 == 0:
+        # Visualization every `self.visualize_every_n_epochs` epochs
+        if (epoch + 1) % self.visualize_every_n_epochs == 0:
             samples = self.sampler.sample(n=16).detach().cpu()[:,0]
             title = f'Generated Samples - Epoch {epoch+1}'
             visualize_samples(samples, title=title)
@@ -291,7 +216,7 @@ class EnergyModelTrainer:
                 print(f'Best validation loss: {self.best_val_loss:.4f} at epoch {self.best_epoch}')
                 break
         
-        return self.metrics.train_losses, self.metrics.val_losses
+        return self.metrics['train_loss'], self.metrics['val_loss']
 
 
 def train_model(model, train_dataloader, val_dataloader, sampler, device, **kwargs):
@@ -302,3 +227,80 @@ def train_model(model, train_dataloader, val_dataloader, sampler, device, **kwar
         **kwargs
     )
     return trainer.train(train_dataloader, val_dataloader)
+
+
+def get_cd_loss(alpha: float):
+    """Returns contrastive divergence and regularization loss function"""
+    def cd_loss(
+            model: nn.modules,
+            data_real: Tensor,
+            data_real_labels: Tensor,
+            data_fake: Tensor,
+            data_rand: Tensor
+        ) -> Tuple[float, dict]:
+        
+        data = torch.cat([data_real, data_fake, data_rand], dim=0)
+        e_real, e_fake, e_rand = model(data).chunk(3, dim=0)
+        avg_e_real = torch.mean(e_real)
+        avg_e_fake = torch.mean(e_fake)
+        avg_e_rand = torch.mean(e_rand)
+        
+        loss_cd = avg_e_real - avg_e_fake
+        loss_reg = alpha * torch.mean(e_real**2 + e_fake**2)
+        loss = loss_cd + loss_reg
+
+        metrics = {
+            'loss': loss.item(),
+            'loss_cd': loss_cd.item(),
+            'loss_reg': loss_reg.item(),
+            'avg_energy_real': avg_e_real.item(),
+            'avg_energy_fake': avg_e_fake.item(),
+            'avg_energy_rand': avg_e_rand.item(),
+        }
+        
+        return loss, metrics
+    
+    return cd_loss
+
+
+def get_multi_class_cd_loss(alpha: float):
+    """Returns contrastive divergence and cross entropy loss function"""
+    cross_entropy_loss = nn.CrossEntropyLoss()
+    
+    def multi_class_cd_loss(
+            model: nn.modules,
+            data_real: Tensor,
+            data_real_labels: Tensor,
+            data_fake: Tensor,
+            data_rand: Tensor
+        ) -> Tuple[float, dict]:
+        data = torch.cat([data_real, data_fake, data_rand], dim=0)
+        logit_real, logit_fake, logit_rand = model(data).chunk(3, dim=0)
+        e_real = -logit_real.exp().sum(axis=1).log()
+        e_fake = -logit_fake.exp().sum(axis=1).log()
+        e_rand = -logit_rand.exp().sum(axis=1).log()
+        avg_e_real = torch.mean(e_real)
+        avg_e_fake = torch.mean(e_fake)
+        avg_e_rand = torch.mean(e_rand)
+        
+        loss_cd = avg_e_real - avg_e_fake
+        loss_clf = cross_entropy_loss(logit_real, data_real_labels)
+        if alpha != 0:
+            loss_reg = alpha * torch.mean(e_real**2 + e_fake**2)
+        else:
+            loss_reg = torch.tensor(0)
+        loss = loss_cd + loss_clf + loss_reg
+
+        metrics = {
+            'loss': loss.item(),
+            'loss_cd': loss_cd.item(),
+            'loss_clf': loss_clf.item(),
+            'loss_reg': loss_reg.item(),
+            'avg_energy_real': avg_e_real.item(),
+            'avg_energy_fake': avg_e_fake.item(),
+            'avg_energy_rand': avg_e_rand.item(),
+        }
+        
+        return loss, metrics
+    
+    return multi_class_cd_loss
